@@ -1,0 +1,4 @@
+package pwr.ist.fleetservice.events;
+
+public record BikeLockedEvent(String userId, String bikeId, String wypozyczenieId, boolean unlocked) {
+}

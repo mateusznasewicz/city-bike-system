@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: rental-service
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASS}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    database: POSTGRESQL
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: ${DB_DDL_AUTO}
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    defer-datasource-initialization: true
+
+server:
+  forward-headers-strategy: framework
+
+springdoc:
+  server:
+    forward-headers-strategy: framework
+  swagger-ui:
+    path: /swagger-ui
+    configUrl: /rental/v3/api-docs/swagger-config
+    url: /rental/v3/api-docs

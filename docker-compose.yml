@@ -1,0 +1,199 @@
+services:
+
+  proxy:
+    image: nginx:latest
+    container_name: proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - fleet-service
+      - rental-service
+      - payment-service
+    networks:
+      - bike-network
+
+  db-rental:
+    image: postgres:14-alpine
+    container_name: db-rental
+    environment:
+      POSTGRES_DB: rental_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_rental_data:/var/lib/postgresql/data
+    networks:
+      - bike-network
+
+  db-payment:
+    image: postgres:14-alpine
+    container_name: db-payment
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_payment_data:/var/lib/postgresql/data
+    networks:
+      - bike-network
+
+  db-fleet:
+    image: postgis/postgis:14-3.4-alpine
+    container_name: db-fleet
+    environment:
+      POSTGRES_DB: fleet_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5434:5432"
+    networks:
+      - bike-network
+    
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    environment:
+      - INFLUXDB_DB=telemetry
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    networks:
+      - bike-network
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - bike-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Xmx128M -Xms128M"
+    networks:
+      - bike-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://192.168.56.201:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+    networks:
+      - bike-network
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka-init
+    depends_on:
+      - kafka
+    volumes:
+      - ./kafka-config:/etc/kafka/scripts
+    command: "bash -c 'echo Waiting for Kafka... && cub kafka-ready -b kafka:29092 1 20 && /etc/kafka/scripts/create-topics.sh'"
+    networks:
+      - bike-network
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - bike-network
+
+  fleet-service:
+    image: ${REGISTRY}/${IMAGE_FL}:latest
+    container_name: fleet-service
+    environment:
+      - DB_DDL_AUTO=validate
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - DB_URL=jdbc:postgresql://db-fleet:5432/fleet_db
+      - SPRING_DATA_REDIS_HOST=redis
+      - BROKER_URL=tcp://mosquitto:1883
+      - JAVA_OPTS=-Xmx384m -Xms384m
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASS=${POSTGRES_PASSWORD}
+    depends_on:
+      - db-fleet
+      - kafka-init
+      - mosquitto
+      - redis
+    networks:
+      - bike-network
+
+  payment-service:
+    image: ${REGISTRY}/${IMAGE_PA}:latest
+    container_name: payment-service
+    environment:
+      - DB_DDL_AUTO=validate
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - DB_URL=jdbc:postgresql://db-payment:5432/payment_db
+      - JAVA_OPTS=-Xmx384m -Xms384m
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASS=${POSTGRES_PASSWORD}
+    depends_on:
+      - db-payment
+      - kafka-init
+    networks:
+      - bike-network
+
+  rental-service:
+    image: ${REGISTRY}/${IMAGE_RE}:latest
+    container_name: rental-service
+    ports:
+      - "8081:8080"
+    environment:
+      - DB_DDL_AUTO=validate
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - DB_URL=jdbc:postgresql://db-rental:5432/rental_db
+      - SPRING_DATA_REDIS_HOST=redis
+      - JAVA_OPTS=-Xmx384m -Xms384m
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASS=${POSTGRES_PASSWORD}
+    depends_on:
+      - db-rental
+      - kafka-init
+      - redis
+    networks:
+      - bike-network
+
+volumes:
+  pg_rental_data:
+  pg_payment_data:
+  pg_fleet_data:
+  influxdb_data:
+  mosquitto_data:
+  mosquitto_log:
+
+networks:
+  bike-network:
+    driver: bridge
+  

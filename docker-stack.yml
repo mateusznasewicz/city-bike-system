@@ -1,0 +1,254 @@
+version: "3.8"
+
+services:
+  proxy:
+    image: nginx:alpine
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+    configs:
+      - source: nginx_config
+        target: /etc/nginx/conf.d/default.conf
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  db-rental:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_DB: rental_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_rental_data:/var/lib/postgresql/data
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  db-payment:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_payment_data:/var/lib/postgresql/data
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  db-fleet:
+    image: postgis/postgis:14-3.4-alpine
+    environment:
+      POSTGRES_DB: fleet_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_fleet_data:/var/lib/postgresql/data
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  influxdb:
+    image: influxdb:1.8
+    environment:
+      - INFLUXDB_DB=telemetry
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  redis:
+    image: redis:alpine
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Xmx128M -Xms128M"
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://192.168.56.201:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    volumes:
+      - type: bind
+        source: /vagrant/kafka-config
+        target: /etc/kafka/scripts
+    command: "bash -c 'echo Waiting for Kafka... && cub kafka-ready -b kafka:29092 1 20 && /etc/kafka/scripts/create-topics.sh'"
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  mosquitto:
+    image: eclipse-mosquitto
+    configs:
+      - source: mosquitto_config
+        target: /mosquitto/config/mosquitto.conf
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  fleet-service:
+    image: ${REGISTRY}/${IMAGE_FL}:latest
+    environment:
+      - DB_DDL_AUTO=validate
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - DB_URL=jdbc:postgresql://db-fleet:5432/fleet_db
+      - SPRING_DATA_REDIS_HOST=redis
+      - BROKER_URL=tcp://mosquitto:1883
+      - JAVA_OPTS=-Xmx384m -Xms384m
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASS=${POSTGRES_PASSWORD}
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  payment-service:
+    image: ${REGISTRY}/${IMAGE_PA}:latest
+    environment:
+      - DB_DDL_AUTO=validate
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - DB_URL=jdbc:postgresql://db-payment:5432/payment_db
+      - JAVA_OPTS=-Xmx384m -Xms384m
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASS=${POSTGRES_PASSWORD}
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+  rental-service:
+    image: ${REGISTRY}/${IMAGE_RE}:latest
+    environment:
+      - DB_DDL_AUTO=validate
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - DB_URL=jdbc:postgresql://db-rental:5432/rental_db
+      - SPRING_DATA_REDIS_HOST=redis
+      - JAVA_OPTS=-Xmx384m -Xms384m
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASS=${POSTGRES_PASSWORD}
+    networks:
+      - bike-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker
+
+volumes:
+  pg_rental_data:
+  pg_payment_data:
+  pg_fleet_data:
+  influxdb_data:
+  mosquitto_data:
+  mosquitto_log:
+
+configs:
+  nginx_config:
+    file: ./nginx.conf
+  mosquitto_config:
+    file: /vagrant/mosquitto-config/mosquitto.conf
+
+networks:
+  bike-network:
+    driver: overlay
