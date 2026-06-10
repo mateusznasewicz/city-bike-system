@@ -249,7 +249,7 @@ city-bike-system/
 
 ## 📫 Connect & Get in Touch  
 💻 **Portfolio:** [mateusznasewicz.dev](https://mateusznasewicz.dev)  
-📧 [mateusznasewicz@proton.me](mailto:mateusznasewicz@proton.me)  
+📧 [mateusznasewicz@gmail.com](mailto:mateusznasewicz@gmail.com)  
 🔗 [LinkedIn](#)  
 
 ---
