@@ -18,9 +18,9 @@ services:
     image: postgres:14-alpine
     container_name: db-rental
     environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: rental_db
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -32,9 +32,9 @@ services:
     image: postgres:14-alpine
     container_name: db-payment
     environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: payment_db
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5433:5432"
     volumes:
@@ -46,11 +46,14 @@ services:
     image: postgis/postgis:14-3.4-alpine
     container_name: db-fleet
     environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: fleet_db
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5434:5432"
+    volumes:
+      - pg_fleet_data:/var/lib/postgresql/data
+      - ./db-fleet-init:/docker-entrypoint-initdb.d
     networks:
       - bike-network
     
@@ -97,7 +100,7 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://192.168.56.201:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://${BACKEND_PUBLIC_IP}:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -130,17 +133,19 @@ services:
       - bike-network
 
   fleet-service:
-    image: ${REGISTRY}/${IMAGE_FL}:latest
+    build:
+      context: ../backend-java/fleet-service 
+      dockerfile: Dockerfile
     container_name: fleet-service
     environment:
       - DB_DDL_AUTO=validate
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - DB_URL=jdbc:postgresql://db-fleet:5432/fleet_db
+      - DB_USER=postgres
+      - DB_PASS=password
       - SPRING_DATA_REDIS_HOST=redis
       - BROKER_URL=tcp://mosquitto:1883
       - JAVA_OPTS=-Xmx384m -Xms384m
-      - DB_USER=${POSTGRES_USER}
-      - DB_PASS=${POSTGRES_PASSWORD}
     depends_on:
       - db-fleet
       - kafka-init
@@ -150,15 +155,17 @@ services:
       - bike-network
 
   payment-service:
-    image: ${REGISTRY}/${IMAGE_PA}:latest
+    build:
+      context: ../backend-java/payment-service 
+      dockerfile: Dockerfile
     container_name: payment-service
     environment:
       - DB_DDL_AUTO=validate
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - DB_URL=jdbc:postgresql://db-payment:5432/payment_db
+      - DB_USER=postgres
+      - DB_PASS=password
       - JAVA_OPTS=-Xmx384m -Xms384m
-      - DB_USER=${POSTGRES_USER}
-      - DB_PASS=${POSTGRES_PASSWORD}
     depends_on:
       - db-payment
       - kafka-init
@@ -166,7 +173,9 @@ services:
       - bike-network
 
   rental-service:
-    image: ${REGISTRY}/${IMAGE_RE}:latest
+    build:
+      context: ../backend-java/rental-service 
+      dockerfile: Dockerfile
     container_name: rental-service
     ports:
       - "8081:8080"
@@ -174,10 +183,10 @@ services:
       - DB_DDL_AUTO=validate
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - DB_URL=jdbc:postgresql://db-rental:5432/rental_db
+      - DB_USER=postgres
+      - DB_PASS=password
       - SPRING_DATA_REDIS_HOST=redis
       - JAVA_OPTS=-Xmx384m -Xms384m
-      - DB_USER=${POSTGRES_USER}
-      - DB_PASS=${POSTGRES_PASSWORD}
     depends_on:
       - db-rental
       - kafka-init
